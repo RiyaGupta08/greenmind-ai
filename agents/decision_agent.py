@@ -8,13 +8,14 @@ import config
 
 console = Console()
 
-_openai_available = bool(config.OPENAI_API_KEY)
-if _openai_available:
+# ── LLM Client Setup (Anthropic Claude) ───────────────────────
+_llm_available = bool(config.ANTHROPIC_API_KEY)
+if _llm_available:
     try:
-        from openai import OpenAI
-        _llm_client = OpenAI(api_key=config.OPENAI_API_KEY)
+        import anthropic
+        _llm_client = anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY)
     except ImportError:
-        _openai_available = False
+        _llm_available = False
         _llm_client = None
 else:
     _llm_client = None
@@ -24,10 +25,10 @@ class DecisionAgent:
 
     def run(self, reports: List[AnomalyReport]) -> List[Decision]:
 
-        if _openai_available:
-            mode = "[bold green]LLM-Powered Mode (GPT reasoning active)[/bold green]"
+        if _llm_available:
+            mode = "[bold green]LLM-Powered Mode (Claude reasoning active)[/bold green]"
         else:
-            mode = "[bold yellow]Rule-Based Mode (set OPENAI_API_KEY to enable LLM)[/bold yellow]"
+            mode = "[bold yellow]Rule-Based Mode (set ANTHROPIC_API_KEY to enable LLM)[/bold yellow]"
 
         console.print(Panel(
             f"[bold cyan]Hybrid AI Decision Engine[/bold cyan]\n{mode}",
@@ -44,15 +45,14 @@ class DecisionAgent:
         return decisions
 
     def _decide(self, report: AnomalyReport) -> Decision:
-        if _openai_available and report.anomaly_type != "none":
+        if _llm_available and report.anomaly_type != "none":
             result = self._llm_decide(report)
             if result:
                 return result
         return self._rule_decide(report)
 
     def _llm_decide(self, report: AnomalyReport) -> Optional[Decision]:
-        prompt = f"""
-You are an expert cloud infrastructure cost optimization AI.
+        prompt = f"""You are an expert cloud infrastructure cost optimization AI.
 
 Analyze this server and choose the best action.
 
@@ -75,16 +75,15 @@ Respond ONLY in valid JSON with no markdown:
   "reasoning": "2-3 sentences explaining WHY for a business audience",
   "confidence": "high OR medium OR low",
   "risk_level": "none OR low OR medium OR high"
-}}
-"""
+}}"""
+
         try:
-            resp = _llm_client.chat.completions.create(
-                model       = config.LLM_MODEL,
-                messages    = [{"role": "user", "content": prompt}],
-                max_tokens  = 350,
-                temperature = 0.2,
+            resp = _llm_client.messages.create(
+                model      = config.LLM_MODEL,
+                max_tokens = 350,
+                messages   = [{"role": "user", "content": prompt}],
             )
-            raw  = resp.choices[0].message.content.strip()
+            raw  = resp.content[0].text.strip()
             raw  = raw.replace("```json", "").replace("```", "").strip()
             data = json.loads(raw)
 
@@ -95,7 +94,7 @@ Respond ONLY in valid JSON with no markdown:
                 confidence   = data.get("confidence", "medium"),
                 anomaly_type = report.anomaly_type,
                 risk_level   = data.get("risk_level", "low"),
-                engine       = "LLM (GPT)",
+                engine       = "LLM (Claude)",
             )
         except Exception as exc:
             console.print(f"  [yellow]LLM failed ({exc}) -- using rules[/yellow]")
